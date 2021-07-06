@@ -6,7 +6,7 @@ import time
 
 import board
 
-from flameeyes_sc16is7xx.sc16is741a import I2C as SC16IS741A
+from flameeyes_sc16is7xx.sc16is741a import SC16IS741A
 
 i2c = board.I2C()
 

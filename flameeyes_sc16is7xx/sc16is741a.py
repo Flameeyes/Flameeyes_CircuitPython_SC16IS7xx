@@ -45,9 +45,11 @@ PARITY_ODD = 1
 PARITY_EVEN = 3
 
 
-class _SC16IS741A:
+class SC16IS741A:
     def __init__(
         self,
+        i2c,
+        address: int,
         *,
         baudrate: int = 9600,
         bits: int = 8,
@@ -57,6 +59,8 @@ class _SC16IS741A:
         crystal_clock: int = 1_843_200,
         fifo: bool = False,
     ):
+        self.i2c_device = i2c_device.I2CDevice(i2c, address)
+
         self._write_reg8(REG_FCR, 0x06)
         self._write_reg8(REG_IER, 0x80 | 0x40 | 0x20)
 
@@ -120,7 +124,7 @@ class _SC16IS741A:
 
     def read(self, nbytes=None) -> bytes:
         end_time = time.monotonic() + self.timeout
-        read_buffer = b''
+        read_buffer = b""
         while (nbytes is None or nbytes > 0) and time.monotonic() < end_time:
             rxlvl = self.rxlvl
             space = min(nbytes, rxlvl) if nbytes is not None else rxlvl
@@ -142,24 +146,6 @@ class _SC16IS741A:
     @property
     def rxlvl(self) -> int:
         return self._read_reg(REG_RXLVL)
-
-    def _write_reg8(self, register, value):
-        raise NotImplementedError
-
-    def _write_reg_bytes(self, register, buf):
-        raise NotImplementedError
-
-    def _read_reg(self, register):
-        raise NotImplementedError
-
-    def _read_reg_bytes(self, register, nbytes):
-        raise NotImplementedError
-
-
-class I2C(_SC16IS741A):
-    def __init__(self, i2c, address, *args, **kwargs):
-        self.i2c_device = i2c_device.I2CDevice(i2c, address)
-        super().__init__(*args, **kwargs)
 
     def _read_reg(self, register):
         # Read an unsigned 8 bit value from the specified 8-bit register.
