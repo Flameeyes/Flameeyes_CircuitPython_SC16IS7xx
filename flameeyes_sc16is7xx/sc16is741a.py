@@ -158,12 +158,12 @@ class _SC16IS741A:
 
 class I2C(_SC16IS741A):
     def __init__(self, i2c, address, *args, **kwargs):
-        self._device = i2c_device.I2CDevice(i2c, address)
+        self.i2c_device = i2c_device.I2CDevice(i2c, address)
         super().__init__(*args, **kwargs)
 
     def _read_reg(self, register):
         # Read an unsigned 8 bit value from the specified 8-bit register.
-        with self._device as i2c:
+        with self.i2c_device as i2c:
             _BUFFER[0] = (register & 0xFF) << 3
 
             i2c.write_then_readinto(_BUFFER, _BUFFER, out_end=1, in_start=1, in_end=2)
@@ -172,7 +172,7 @@ class I2C(_SC16IS741A):
     def _read_reg_bytes(self, register, nbytes):
         assert nbytes <= 64
 
-        with self._device as i2c:
+        with self.i2c_device as i2c:
             _BUFFER[0] = (register & 0xFF) << 3
 
             i2c.write_then_readinto(
@@ -182,7 +182,7 @@ class I2C(_SC16IS741A):
 
     def _write_reg8(self, register, val):
         # Write an 8 bit value to the specified 8-bit register.
-        with self._device as i2c:
+        with self.i2c_device as i2c:
             _BUFFER[0] = (register & 0xFF) << 3
             _BUFFER[1] = val & 0xFF
             i2c.write(_BUFFER, end=2)
@@ -190,7 +190,7 @@ class I2C(_SC16IS741A):
     def _write_reg_bytes(self, register, buf):
         assert len(buf) <= 64
 
-        with self._device as i2c:
+        with self.i2c_device as i2c:
             _BUFFER[0] = (register & 0xFF) << 3
             _BUFFER[1 : len(buf) + 1] = buf
             i2c.write(_BUFFER, end=len(buf) + 1)
