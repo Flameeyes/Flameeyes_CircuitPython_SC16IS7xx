@@ -8,6 +8,8 @@
 import time
 
 from micropython import const
+
+from adafruit_register import i2c_bit, i2c_bits
 from adafruit_bus_device import i2c_device
 
 # Pre-shift register addresses by three bits. Both I2C and SPI addressing for
@@ -64,61 +66,20 @@ class SC16IS741A:
         fifo: bool = False,
     ):
         self.i2c_device = i2c_device.I2CDevice(i2c, address)
-
-        self._write_reg8(REG_FCR, 0x06)
-        self._write_reg8(REG_IER, 0x80 | 0x40 | 0x20)
+        self._crystal_clock = crystal_clock
 
         if parity is None:
             parity = PARITY_NONE
 
-        if parity not in (PARITY_NONE, PARITY_EVEN, PARITY_ODD):
-            raise ValueError(
-                "Value {parity:2x} is not valid for parity parameter".format(
-                    parity=parity
-                )
-            )
-
-        if stop not in (1, 2):
-            raise ValueError(
-                "Value {stop} is not valid for stop parameter".format(stop=stop)
-            )
-
-        if bits not in (5, 6, 7, 8):
-            raise ValueError(
-                "Value {bits} is not valid for bits parameter".format(bits=bits)
-            )
-
-        lcr_value = (parity << 3) | (stop - 1) << 2 | (bits - 5) << 0
-
+        self.parity = parity
+        self.stop_bits = stop
+        self.word_length = bits
+        self.fifo_enable = fifo
+        self.baudrate = baudrate
         self.timeout = timeout
 
-        self._fifo = fifo
-        fcr_value = 0
-        if self._fifo:
-            fcr_value |= 0x01
-
-        mcr_value = 0
-
-        # Try first without having to set prescaler
-        divisor = crystal_clock / (16 * baudrate)
-        if divisor > 0xFFFF:
-            mcr_value |= 0x80  # set prescaler = 4
-            divisor /= 4
-
-        divisor = int(divisor)
-        if divisor > 0xFFFF or divisor == 0:
-            raise ValueError(
-                "Unable to configure baud rate to {baudrate} with a crystal of {crystal_clock}".format(
-                    baudrate=baudrate, crystal_clock=crystal_clock
-                )
-            )
-
-        self._write_reg8(REG_LCR, 0x80)
-        self._write_reg8(REG_DLH, divisor >> 8)
-        self._write_reg8(REG_DLL, divisor & 0xFF)
-        self._write_reg8(REG_LCR, lcr_value)
-        self._write_reg8(REG_MCR, mcr_value)
-        self._write_reg8(REG_FCR, fcr_value)
+        self.rx_fifo_reset = True
+        self.tx_fifo_reset = True
 
     def write(self, buf: bytes) -> int:
         space = min(len(buf), self.txlvl)
@@ -140,24 +101,115 @@ class SC16IS741A:
 
         return read_buffer
 
+    rxlvl = i2c_bits.ROBits(8, REG_RXLVL, 0)
+    _txlvl = i2c_bits.ROBits(8, REG_TXLVL, 0)
+    thr_empty = i2c_bit.ROBit(REG_LSR, 5)
+
     @property
     def txlvl(self) -> int:
-        if self._fifo:
-            return self._read_reg(REG_TXLVL)
+        if self.fifo_enable:
+            return self._txlvl
         else:
-            return 1 if self._read_reg(REG_LSR) & 0x20 else 0
+            return 1 if self.thr_empty else 0
+
+    rx_trigger_level = i2c_bits.RWBits(2, REG_FCR, 6)  # WO
+    tx_trigger_level = i2c_bits.RWBits(2, REG_FCR, 4)  # WO
+    tx_fifo_reset = i2c_bit.RWBit(REG_FCR, 2)  # WO
+    rx_fifo_reset = i2c_bit.RWBit(REG_FCR, 1)  # WO
+    fifo_enable = i2c_bit.RWBit(REG_FCR, 0)  # WO
+
+    _parity_mode = i2c_bits.RWBits(3, REG_LCR, 3)
+    _stop_bits = i2c_bit.RWBit(REG_LCR, 2)
+    _word_length = i2c_bits.RWBits(2, REG_LCR, 0)
 
     @property
-    def rxlvl(self) -> int:
-        return self._read_reg(REG_RXLVL)
+    def parity(self):
+        return self._parity_mode
 
-    def _read_reg(self, register):
-        # Read an unsigned 8 bit value from the specified 8-bit register.
-        with self.i2c_device as i2c:
-            _BUFFER[0] = register
+    @parity.setter
+    def parity(self, value):
+        if value not in (PARITY_NONE, PARITY_EVEN, PARITY_ODD):
+            raise ValueError(
+                "Value {value:2x} is not valid for parity parameter".format(value=value)
+            )
 
-            i2c.write_then_readinto(_BUFFER, _BUFFER, out_end=1, in_start=1, in_end=2)
-            return _BUFFER[1]
+        self._parity = value
+
+    @property
+    def stop_bits(self):
+        return int(self._stop_bits) + 1
+
+    @stop_bits.setter
+    def stop_bits(self, value):
+        if value not in (1, 2):
+            raise ValueError(
+                "Value {value} is not valid for stop parameter".format(value=value)
+            )
+
+        self._stop_bits = bool(value - 1)
+
+    @property
+    def word_length(self):
+        return int(self._word_length) + 5
+
+    @word_length.setter
+    def word_length(self, bits):
+        if bits not in (5, 6, 7, 8):
+            raise ValueError(
+                "Value {bits} is not valid for bits parameter".format(bits=bits)
+            )
+
+        self._word_length = bits - 5
+
+    _divisor_latch_enable = i2c_bit.RWBit(REG_LCR, 7)
+    _dll = i2c_bits.RWBits(8, REG_DLL, 0)
+    _dlh = i2c_bits.RWBits(8, REG_DLH, 0)
+    _clock_prescaler = i2c_bit.RWBit(REG_MCR, 7)
+
+    @property
+    def _divisor(self):
+        self._divisor_latch_enable = True
+        divisor = self._dll | (self._dlh << 8)
+        self._divisor_latch_enable = False
+        return divisor
+
+    @_divisor.setter
+    def _divisor(self, value):
+        if value > 0xFFFF or value == 0:
+            raise ValueError(
+                "Unable to configure divisor to {value}.".format(value=value)
+            )
+
+        self._divisor_latch_enable = True
+        self._dll = int(value) & 0xFF
+        self._dlh = int(value) >> 8
+        self._divisor_latch_enable = False
+
+    @property
+    def baudrate(self):
+        divisor = self._divisor
+        if self._clock_prescaler:
+            divisor *= 4
+
+        return self._crystal_clock / (16 * divisor)
+
+    @baudrate.setter
+    def baudrate(self, value):
+        divisor = self._crystal_clock / (16 * value)
+
+        # This is not representable even with prescaler enabled.
+        if divisor > 0x3FFFC:
+            raise ValueError(
+                "Unable to configure baud rate to {value} with a crystal of {crystal_clock}".format(
+                    value=value, crystal_clock=self._crystal_clock
+                )
+            )
+        # This can only be represented with prescaler enabled.
+        elif divisor > 0xFFFF:
+            divisor /= 4
+            self._clock_prescaler = True
+
+        self._divisor = divisor
 
     def _read_reg_bytes(self, register, nbytes):
         assert nbytes <= 64
@@ -169,13 +221,6 @@ class SC16IS741A:
                 _BUFFER, _BUFFER, out_end=1, in_start=1, in_end=nbytes + 1
             )
             return _BUFFER[1 : nbytes + 1]
-
-    def _write_reg8(self, register, val):
-        # Write an 8 bit value to the specified 8-bit register.
-        with self.i2c_device as i2c:
-            _BUFFER[0] = register
-            _BUFFER[1] = val & 0xFF
-            i2c.write(_BUFFER, end=2)
 
     def _write_reg_bytes(self, register, buf):
         assert len(buf) <= 64
