@@ -10,29 +10,33 @@ import time
 from micropython import const
 from adafruit_bus_device import i2c_device
 
-# Pre-shifted addresses, SC16IS741A has three trailing zero bits.
-REG_RHR = const(0x00)
-REG_THR = const(0x00)
-REG_IER = const(0x01)
-REG_FCR = const(0x02)
-REG_LCR = const(0x03)
-REG_MCR = const(0x04)
-REG_LSR = const(0x05)
-REG_MSR = const(0x06)
-REG_SPR = const(0x07)
-REG_TCR = const(0x06)
-REG_TLR = const(0x07)
-REG_TXLVL = const(0x08)
-REG_RXLVL = const(0x09)
-REG_RESET = const(0x0E)
-REG_EFCR = const(0x0F)
-REG_DLL = const(0x00)
-REG_DLH = const(0x01)
-REG_EFR = const(0x02)
-REG_XON1 = const(0x04)
-REG_XON2 = const(0x05)
-REG_XOFF1 = const(0x06)
-REG_XOFF2 = const(0x06)
+# Pre-shift register addresses by three bits. Both I2C and SPI addressing for
+# the registers in this part number has three trailing zero bits.
+#
+# Beware! Dual-UART part numbers actually include the channel information as
+# part of those three bits!
+REG_RHR = const(0x00 << 3)
+REG_THR = const(0x00 << 3)
+REG_IER = const(0x01 << 3)
+REG_FCR = const(0x02 << 3)
+REG_LCR = const(0x03 << 3)
+REG_MCR = const(0x04 << 3)
+REG_LSR = const(0x05 << 3)
+REG_MSR = const(0x06 << 3)
+REG_SPR = const(0x07 << 3)
+REG_TCR = const(0x06 << 3)
+REG_TLR = const(0x07 << 3)
+REG_TXLVL = const(0x08 << 3)
+REG_RXLVL = const(0x09 << 3)
+REG_RESET = const(0x0E << 3)
+REG_EFCR = const(0x0F << 3)
+REG_DLL = const(0x00 << 3)
+REG_DLH = const(0x01 << 3)
+REG_EFR = const(0x02 << 3)
+REG_XON1 = const(0x04 << 3)
+REG_XON2 = const(0x05 << 3)
+REG_XOFF1 = const(0x06 << 3)
+REG_XOFF2 = const(0x06 << 3)
 
 
 # Global buffer for reading and writing registers with the devices.  This is
@@ -150,7 +154,7 @@ class SC16IS741A:
     def _read_reg(self, register):
         # Read an unsigned 8 bit value from the specified 8-bit register.
         with self.i2c_device as i2c:
-            _BUFFER[0] = (register & 0xFF) << 3
+            _BUFFER[0] = register
 
             i2c.write_then_readinto(_BUFFER, _BUFFER, out_end=1, in_start=1, in_end=2)
             return _BUFFER[1]
@@ -159,7 +163,7 @@ class SC16IS741A:
         assert nbytes <= 64
 
         with self.i2c_device as i2c:
-            _BUFFER[0] = (register & 0xFF) << 3
+            _BUFFER[0] = register
 
             i2c.write_then_readinto(
                 _BUFFER, _BUFFER, out_end=1, in_start=1, in_end=nbytes + 1
@@ -169,7 +173,7 @@ class SC16IS741A:
     def _write_reg8(self, register, val):
         # Write an 8 bit value to the specified 8-bit register.
         with self.i2c_device as i2c:
-            _BUFFER[0] = (register & 0xFF) << 3
+            _BUFFER[0] = register
             _BUFFER[1] = val & 0xFF
             i2c.write(_BUFFER, end=2)
 
@@ -177,6 +181,6 @@ class SC16IS741A:
         assert len(buf) <= 64
 
         with self.i2c_device as i2c:
-            _BUFFER[0] = (register & 0xFF) << 3
+            _BUFFER[0] = register
             _BUFFER[1 : len(buf) + 1] = buf
             i2c.write(_BUFFER, end=len(buf) + 1)
